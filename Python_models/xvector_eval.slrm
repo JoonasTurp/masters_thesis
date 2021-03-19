@@ -1,0 +1,71 @@
+#!/bin/bash
+
+#SBATCH --time=1:00:00
+#SBATCH -c 1
+#SBATCH --gres=gpu:1
+#SBATCH --mem=5G
+############SBATCH -o /scratch/work/turpeim1/python_models/log/final_xvector-%j.out
+#SBATCH --array=0-3
+#SBATCH -o /scratch/work/turpeim1/python_models/log/final_xvector-%A_%a.out
+
+#####47=8*6-1
+module load anaconda3 matlab/r2019a cuda/10.1.243
+
+noise_percentage=$(($SLURM_ARRAY_TASK_ID/6+1))
+#noise_percentage=1
+#task_id=1
+use_cuda=1
+task_id=$(($SLURM_ARRAY_TASK_ID%6+1))
+case $task_id in
+1)
+  layer_count=7;
+  last_layer_ind=0;
+  loss_ind=0;
+  ;;
+2)
+  layer_count=7;
+  last_layer_ind=1;
+  loss_ind=0;
+  ;;
+3)
+  layer_count=6;
+  last_layer_ind=0;
+  loss_ind=0;
+  ;;
+4)
+  layer_count=6;
+  last_layer_ind=1;
+  loss_ind=0;
+  ;;
+esac
+
+epochs=50;
+nspeaker=0;
+nceps=20;
+dataset=dev;
+
+weigthFilename=/scratch/work/turpeim1/python_models/models/xvector_model_v2_$dataset-full-nceps-$nceps-noise_level-$noise_percentage-layer_count-$layer_count-last_layer_ind-$last_layer_ind-loss_ind-$loss_ind.pth;
+
+
+for dataset in voxceleb1_wav_test test atr_kids
+do
+
+echo "Evaluating xvectors for $dataset"
+
+feature_datafile=/scratch/work/turpeim1/matlab/data/$dataset-full-nceps-$nceps-noise_level-$noise_percentage.mat;
+scoreFile=/scratch/work/turpeim1/python_models/data/x_vector_v2-scores-$dataset-full-nceps-$nceps-noise_level-$noise_percentage-layer_count-$layer_count-last_layer_ind-$last_layer_ind-loss_ind-$loss_ind.mat;
+validation_dataFilename=/scratch/work/turpeim1/python_models/data/xvector_v2_validation_$dataset-full-nceps-$nceps-noise_level-$noise_percentage-layer_count-$layer_count-last_layer_ind-$last_layer_ind-loss_ind-$loss_ind;
+
+formed_datafile=/scratch/work/turpeim1/python_models/models/$dataset-$nspeaker.hdf5
+# 10 speakers is around 4.11G
+if test -f "$formed_datafile";then 
+echo "$formed_datafile does exist"
+else
+srun python -u x_vector_trainer_dataform.py $feature_datafile $formed_datafile $nspeaker
+fi
+
+
+srun python -u xvector.py $formed_datafile $weigthFilename $validation_dataFilename $nspeaker
+srun matlab -nojvm -nosplash -r "addpath(genpath('/scratch/work/turpeim1/matlab'));xvector_results('$scoreFile','$validation_dataFilename',0); exit(0)"
+
+done
